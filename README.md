@@ -1,176 +1,594 @@
 # Box Selection System
 
-A production-quality Django 5.x REST API system that recommends the most suitable shipping box for ecommerce orders. The system evaluates item geometry and weight constraints using a deterministic Extreme Points 3D bin-packing heuristic, guaranteeing **zero false positives** (no invalid or overlapping placements).
+A production-quality Django 5.x REST API that recommends the most suitable shipping box for ecommerce orders.
+
+The system evaluates product dimensions, item quantities, total weight, and box capacity using a deterministic Extreme Points 3D bin-packing heuristic.
+
+The packing engine is designed with a **zero-false-positive guarantee**: whenever it reports that an order fits inside a box, the resulting placements are independently validated for bounds and pairwise overlap.
+
+> **Important:** The packing algorithm is a deterministic heuristic, not an exact 3D bin-packing solver. It may report that an order does not fit even when a more sophisticated packing arrangement might exist.
 
 ---
 
 ## Table of Contents
-- [Project Overview](#project-overview)
-- [Setup and Quickstart](#setup-and-quickstart)
-- [Testing and Linting](#testing-and-linting)
-- [API Reference & Examples](#api-reference--examples)
-- [Core Algorithm Explanation & Worked Example](#core-algorithm-explanation--worked-example)
-- [System Assumptions & Units](#system-assumptions--units)
-- [Rejection Reasons](#rejection-reasons)
-- [Known Limitations & Future Improvements](#known-limitations--future-improvements)
+
+* [Project Overview](#project-overview)
+* [Features](#features)
+* [Technology Stack](#technology-stack)
+* [Repository Structure](#repository-structure)
+* [Setup and Quickstart](#setup-and-quickstart)
+* [Environment Configuration](#environment-configuration)
+* [Database](#database)
+* [Seed Demo Data](#seed-demo-data)
+* [Running the Application](#running-the-application)
+* [Testing and Linting](#testing-and-linting)
+* [Test Coverage](#test-coverage)
+* [API Reference](#api-reference)
+* [API Examples](#api-examples)
+* [Core Algorithm](#core-algorithm)
+* [Step-by-Step Worked Example](#step-by-step-worked-example)
+* [Box Selection Rules](#box-selection-rules)
+* [Rejection Reasons](#rejection-reasons)
+* [Duplicate SKU Handling](#duplicate-sku-handling)
+* [System Assumptions and Units](#system-assumptions-and-units)
+* [Error Handling](#error-handling)
+* [Known Limitations](#known-limitations)
+* [Future Improvements](#future-improvements)
+* [OpenAPI Documentation](#openapi-documentation)
+* [CI](#ci)
+* [AI Usage](#ai-usage)
+* [License](#license)
 
 ---
 
-## Project Overview
-For any ecommerce order (a list of products and quantities), the **Box Selection System** selects the **cheapest shipping box** in which all items physically fit geometrically without exceeding the box's maximum contents weight limit. Ties are broken deterministically by smaller box volume, then by lowest box ID.
+# Project Overview
 
-Key technical choices:
-- **Framework**: Python 3.11+ & Django 5.1 REST Framework (`drf-spectacular` for OpenAPI 3.0 docs).
-- **Database**: SQLite default (compatible with PostgreSQL via `DATABASE_URL`).
-- **Precision**: Exact `Decimal` arithmetic everywhere (no floating-point rounding bugs).
-- **Pure Python Algorithm**: Zero 3rd-party bin-packing dependencies (`py3dbp`, etc.). Core packing engine is placed in `boxes/services/packing.py` with zero Django/ORM imports.
+For an ecommerce order containing one or more products, the warehouse needs to determine which shipping box can contain the entire order.
 
----
+The **Box Selection System** evaluates all active boxes and recommends the cheapest box in which:
 
-## Setup and Quickstart
+1. Every item physically fits.
+2. The total contents weight does not exceed the box's maximum weight.
+3. The geometric packing algorithm successfully finds a valid arrangement.
 
-### 1. Environment Setup
-```bash
-# Clone repository and navigate to root directory
-cd boxwise
+If multiple feasible boxes have the same cost, selection is deterministic:
 
-# Create virtual environment
-python -m venv venv
+1. Lowest cost.
+2. Smaller box volume.
+3. Lowest box ID.
 
-# Activate virtual environment
-# Windows (PowerShell):
-.\venv\Scripts\Activate.ps1
-# Linux/macOS:
-source venv/bin/activate
+If no single active box can contain the complete order, the API returns:
 
-# Install dependencies
-pip install -r requirements.txt
+```text
+NO_SINGLE_BOX_FITS
 ```
 
-### 2. Migrations & Seed Data
-```bash
-# Apply database migrations
-python manage.py migrate
+along with the rejection reason for each evaluated box.
 
-# Seed database with realistic sample boxes, products, and orders
+---
+
+# Features
+
+* Django 5.x REST API
+* Django REST Framework
+* Versioned API under `/api/v1/`
+* Product CRUD
+* Box CRUD
+* Order CRUD with nested order items
+* Ad-hoc box recommendation
+* Saved-order box recommendation
+* Deterministic 3D packing heuristic
+* Six possible item orientations
+* Exact Decimal arithmetic
+* Weight and volume pre-checks
+* Individual item dimension pre-check
+* Independent placement validation
+* Deterministic box selection
+* Alternatives and rejected-box explanations
+* Configurable maximum number of expanded units
+* Django admin
+* Demo data management command
+* Pytest test suite
+* Brute-force cross-check test
+* Ruff linting and formatting
+* Coverage reporting
+* GitHub Actions CI
+* OpenAPI / Swagger documentation
+
+---
+
+# Technology Stack
+
+| Technology            | Purpose                                  |
+| --------------------- | ---------------------------------------- |
+| Python 3.11+          | Programming language                     |
+| Django 5.x            | Web framework                            |
+| Django REST Framework | REST API                                 |
+| SQLite                | Default development database             |
+| PostgreSQL            | Supported through database configuration |
+| pytest                | Testing                                  |
+| pytest-django         | Django integration for pytest            |
+| coverage              | Test coverage                            |
+| Ruff                  | Linting and formatting                   |
+| drf-spectacular       | OpenAPI documentation                    |
+
+The core packing algorithm does **not** use a third-party bin-packing library such as `py3dbp`.
+
+The packing implementation is contained in:
+
+```text
+boxes/services/packing.py
+```
+
+and does not import Django or the ORM.
+
+---
+
+# Repository Structure
+
+```text
+boxwise/
+│
+├── manage.py
+├── requirements.txt
+├── pyproject.toml
+├── .gitignore
+├── .env.example
+├── README.md
+├── AI_USAGE.md
+├── TEST_OUTPUT.md
+│
+├── .github/
+│   └── workflows/
+│       └── ci.yml
+│
+├── config/
+│   ├── __init__.py
+│   ├── settings.py
+│   ├── urls.py
+│   ├── asgi.py
+│   └── wsgi.py
+│
+└── boxes/
+    ├── __init__.py
+    ├── admin.py
+    ├── apps.py
+    ├── exceptions.py
+    ├── models.py
+    ├── serializers.py
+    ├── urls.py
+    ├── views.py
+    │
+    ├── services/
+    │   ├── __init__.py
+    │   ├── packing.py
+    │   └── selection.py
+    │
+    ├── management/
+    │   └── commands/
+    │       └── seed_demo_data.py
+    │
+    ├── migrations/
+    │
+    └── tests/
+        ├── test_api.py
+        ├── test_brute_force.py
+        ├── test_commands.py
+        ├── test_models.py
+        ├── test_packing.py
+        └── test_selection.py
+```
+
+---
+
+# Setup and Quickstart
+
+## 1. Clone the repository
+
+```bash
+git clone <repository-url>
+cd boxwise
+```
+
+---
+
+## 2. Create a virtual environment
+
+### Windows PowerShell
+
+```powershell
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+```
+
+### Linux/macOS
+
+```bash
+python -m venv venv
+source venv/bin/activate
+```
+
+---
+
+## 3. Install dependencies
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+---
+
+## 4. Apply migrations
+
+```bash
+python manage.py migrate
+```
+
+---
+
+## 5. Seed demo data
+
+```bash
 python manage.py seed_demo_data --clear
 ```
 
-### 3. Run Local Server
-```bash
-python manage.py runserver
-```
-The server will start at `http://127.0.0.1:8000/`.
-- Interactive Swagger UI: `http://127.0.0.1:8000/api/schema/swagger-ui/`
-- Admin Panel: `http://127.0.0.1:8000/admin/`
+The `--clear` option clears existing demo records before loading the sample data.
 
 ---
 
-## Testing and Linting
-
-The system targets **>90% test coverage** across all modules.
+## 6. Run the development server
 
 ```bash
-# Run Ruff linter and formatter check
-ruff check .
-ruff format --check .
+python manage.py runserver
+```
 
-# Run full Pytest suite
+The API will be available at:
+
+```text
+http://127.0.0.1:8000/
+```
+
+Swagger UI:
+
+```text
+http://127.0.0.1:8000/api/schema/swagger-ui/
+```
+
+Admin panel:
+
+```text
+http://127.0.0.1:8000/admin/
+```
+
+---
+
+# Environment Configuration
+
+Create a `.env` file from `.env.example` when environment-specific configuration is required.
+
+Example:
+
+```env
+SECRET_KEY=your-development-secret-key
+DEBUG=True
+ALLOWED_HOSTS=127.0.0.1,localhost
+DATABASE_URL=
+MAX_ORDER_UNITS=200
+```
+
+For local development, safe defaults are provided.
+
+The database configuration supports SQLite by default and can be configured for PostgreSQL using `DATABASE_URL`.
+
+Do not commit real secrets or production credentials to Git.
+
+---
+
+# Database
+
+SQLite is used by default for easy local development.
+
+Run migrations with:
+
+```bash
+python manage.py migrate
+```
+
+The main database entities are:
+
+## Product
+
+Stores product information:
+
+* SKU
+* name
+* length
+* width
+* height
+* weight
+* active status
+* timestamps
+
+Dimensions and weight must be greater than zero.
+
+## Box
+
+Stores:
+
+* name
+* internal length
+* internal width
+* internal height
+* maximum contents weight
+* cost
+* optional empty weight
+* active status
+* timestamps
+
+Box dimensions and maximum weight must be greater than zero.
+
+Box cost may be zero or greater.
+
+## Order
+
+Stores an order reference and creation timestamp.
+
+## OrderItem
+
+Associates products with an order and stores the requested quantity.
+
+The same product can occur only once per saved order.
+
+## BoxRecommendation
+
+Stores an audit record containing:
+
+* order
+* recommended box
+* result status
+* recommendation payload
+* creation timestamp
+
+---
+
+# Seed Demo Data
+
+The project includes:
+
+```bash
+python manage.py seed_demo_data
+```
+
+To clear existing demo records first:
+
+```bash
+python manage.py seed_demo_data --clear
+```
+
+This command creates realistic products, boxes, and sample orders for local development and testing.
+
+---
+
+# Running the Application
+
+Start the server:
+
+```bash
+python manage.py runserver
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8000/
+```
+
+Swagger documentation:
+
+```text
+http://127.0.0.1:8000/api/schema/swagger-ui/
+```
+
+---
+
+# Testing and Linting
+
+## Django system check
+
+```bash
+python manage.py check
+```
+
+Expected result:
+
+```text
+System check identified no issues (0 silenced).
+```
+
+---
+
+## Run the full test suite
+
+```bash
 pytest
+```
 
-# Run tests with Coverage report
+The project test suite covers:
+
+* API behavior
+* model constraints
+* packing pre-checks
+* rotations
+* exact-fit boundaries
+* geometry failures
+* deterministic packing
+* selection rules
+* alternatives
+* rejected boxes
+* no-single-box cases
+* performance for large quantities
+* brute-force cross-checking
+* seed data command
+
+---
+
+## Run Ruff
+
+```bash
+ruff check .
+```
+
+---
+
+## Check formatting
+
+```bash
+ruff format --check .
+```
+
+---
+
+## Automatically format files
+
+```bash
+ruff format .
+```
+
+---
+
+# Test Coverage
+
+Run:
+
+```bash
 coverage run -m pytest
 coverage report
 ```
 
-### Running the Brute-Force Cross-Check Test
-We include a brute-force cross-check solver in `boxes/tests/test_brute_force.py` that benchmarks our Extreme Points heuristic against exhaustive search on random small orders with a fixed seed:
-```bash
-pytest -s boxes/tests/test_brute_force.py
+The project targets more than 90% coverage for the core packing and selection modules.
+
+The verified coverage for the current implementation is:
+
+```text
+boxes/services/packing.py       92.57%
+boxes/services/selection.py    100.00%
+TOTAL                           95.21%
 ```
+
+The coverage requirement is particularly important for the packing and selection modules because these contain the core decision-making logic.
 
 ---
 
-## API Reference & Examples
+# API Reference
 
-### Endpoints Overview
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET / POST` | `/api/v1/products/` | List (with `?is_active=true` filter and search) or create Products |
-| `GET / POST` | `/api/v1/boxes/` | List (with `?is_active=true` filter and search) or create Boxes |
-| `GET / POST` | `/api/v1/orders/` | List or create Orders (accepts nested items) |
-| `GET` | `/api/v1/orders/{id}/recommend-box/` | Recommend box for a saved order & log audit record |
-| `POST` | `/api/v1/recommend-box/` | Ad-hoc box recommendation without saving order |
+All REST endpoints are versioned under:
 
----
-
-### Ad-Hoc Recommendation Example
-
-#### Request (`POST /api/v1/recommend-box/`):
-```bash
-curl -X POST http://127.0.0.1:8000/api/v1/recommend-box/ \
-  -H "Content-Type: application/json" \
-  -d '{
-    "items": [
-      {"sku": "PROD-BOOK", "quantity": 2},
-      {"sku": "PROD-MUG", "quantity": 1}
-    ]
-  }'
+```text
+/api/v1/
 ```
 
-#### Successful Response (`200 OK`):
+## Products
+
+### List products
+
+```http
+GET /api/v1/products/
+```
+
+Optional filtering:
+
+```http
+GET /api/v1/products/?is_active=true
+```
+
+### Create product
+
+```http
+POST /api/v1/products/
+```
+
+Example:
+
 ```json
 {
-  "status": "RECOMMENDED",
-  "recommended_box": {
-    "id": 2,
-    "name": "Small Shipping Box",
-    "cost": "1.20",
-    "dimensions": ["25.00", "20.00", "15.00"]
-  },
-  "order_summary": {
-    "total_items": 3,
-    "total_weight": "2.150",
-    "total_volume": "4056.00"
-  },
-  "utilisation": {
-    "volume_pct": 54.1,
-    "weight_pct": 43.0
-  },
-  "placements": [
+  "sku": "PROD-BOOK",
+  "name": "Hardcover Book",
+  "length": "24.00",
+  "width": "17.00",
+  "height": "3.50",
+  "weight": "0.850",
+  "is_active": true
+}
+```
+
+---
+
+# Boxes
+
+### List boxes
+
+```http
+GET /api/v1/boxes/
+```
+
+Optional filtering:
+
+```http
+GET /api/v1/boxes/?is_active=true
+```
+
+### Create box
+
+```http
+POST /api/v1/boxes/
+```
+
+Example:
+
+```json
+{
+  "name": "Small Shipping Box",
+  "internal_length": "25.00",
+  "internal_width": "20.00",
+  "internal_height": "15.00",
+  "max_weight": "5.00",
+  "cost": "1.20",
+  "empty_weight": "0.20",
+  "is_active": true
+}
+```
+
+---
+
+# Orders
+
+### List orders
+
+```http
+GET /api/v1/orders/
+```
+
+### Create order
+
+Orders accept nested items.
+
+```http
+POST /api/v1/orders/
+```
+
+Example:
+
+```json
+{
+  "reference": "ORDER-1001",
+  "items": [
     {
-      "item_id": 1,
       "sku": "PROD-BOOK",
-      "position": ["0.00", "0.00", "0.00"],
-      "dimensions": ["24.00", "17.00", "3.50"]
+      "quantity": 2
     },
     {
-      "item_id": 2,
-      "sku": "PROD-BOOK",
-      "position": ["0.00", "0.00", "3.50"],
-      "dimensions": ["24.00", "17.00", "3.50"]
-    },
-    {
-      "item_id": 3,
       "sku": "PROD-MUG",
-      "position": ["0.00", "0.00", "7.00"],
-      "dimensions": ["12.00", "10.00", "10.00"]
-    }
-  ],
-  "alternatives": [
-    {
-      "id": 3,
-      "name": "Medium Shipping Box",
-      "cost": "2.10",
-      "dimensions": ["35.00", "28.00", "20.00"]
-    }
-  ],
-  "rejected_boxes": [
-    {
-      "id": 1,
-      "name": "Mailer Envelope",
-      "reason": "ITEM_TOO_LARGE",
-      "detail": "Item PROD-BOOK (24.00x17.00x3.50 cm) exceeds box internal dimensions in isolation."
+      "quantity": 1
     }
   ]
 }
@@ -178,94 +596,911 @@ curl -X POST http://127.0.0.1:8000/api/v1/recommend-box/ \
 
 ---
 
-## Core Algorithm Explanation & Worked Example
+# Ad-Hoc Box Recommendation
 
-The core algorithm lives in `boxes/services/packing.py` as a pure Python module independent of Django/ORM.
+An ad-hoc recommendation does not create an order.
 
-### Algorithm Steps
-1. **Order Line Expansion & Deterministic Item Sorting**:
-   Order quantities are expanded into individual unit item instances (e.g. quantity 3 = 3 items). Items are sorted deterministically: `volume DESC` $\rightarrow$ `longest_dimension DESC` $\rightarrow$ `sku/id ASC`.
-2. **Fast Pre-Checks**:
-   Before attempting expensive 3D placement, every active box undergoes fast pre-checks:
-   - `WEIGHT_EXCEEDED`: $\sum \text{item weight} > \text{box max\_weight}$.
-   - `ITEM_TOO_LARGE`: Pairwise comparison of sorted item dimensions $[l, w, h]$ against sorted box dimensions $[BL, BW, BH]$.
-   - `VOLUME_EXCEEDED`: $\sum \text{item volume} > \text{box volume}$.
-3. **Extreme Points (EP) 3D Placement Heuristic**:
-   - Maintain a dynamic set of Candidate Extreme Points ($EP$), initialized to `[(0.00, 0.00, 0.00)]`.
-   - Sort candidate points deterministically by priority: $z\text{ ASC}, y\text{ ASC}, x\text{ ASC}$ (layering items bottom-to-top, back-to-front).
-   - For each item, iterate through candidate points in priority order, testing all 6 3D orientations $(dx, dy, dz)$.
-   - **Bounds & Overlap Validation**:
-     - Placement must be inside box bounds ($x + dx \le L$, $y + dy \le W$, $z + dz \le H$).
-     - Placement must not strictly intersect any existing item bounding box:
-       $$\max(x_1, x_2) < \min(x_1 + dx_1, x_2 + dx_2)$$
-       across all 3 axes. Touching faces are permitted.
-   - **Point Generation & Removal**:
-     - Placing an item generates new extreme points at top/right/front faces and projections against adjacent items/box boundaries.
-     - Points strictly inside placed item boxes or outside box bounds are removed.
-4. **Zero False Positive Guarantee**:
-   Before returning any positive packing result, an independent validator `validate_placements(box, placements)` re-checks bounds and $O(N^2)$ pairwise 3D overlaps. An internal assertion `assert validate_placements(...)` is executed.
-5. **Selection Engine Ranking**:
-   Feasible boxes are sorted by: `cost ASC` (cheapest wins) $\rightarrow$ `volume ASC` $\rightarrow$ `box_id ASC`.
+```http
+POST /api/v1/recommend-box/
+```
+
+Request:
+
+```json
+{
+  "items": [
+    {
+      "sku": "PROD-BOOK",
+      "quantity": 2
+    },
+    {
+      "sku": "PROD-MUG",
+      "quantity": 1
+    }
+  ]
+}
+```
 
 ---
 
-### Step-by-Step Worked Example
+# Saved Order Recommendation
 
-Suppose an order consists of:
-- **2x Hardcover Books** ($24 \times 17 \times 3.5\text{ cm}$, $0.85\text{ kg}$)
-- **1x Coffee Mug** ($12 \times 10 \times 10\text{ cm}$, $0.45\text{ kg}$)
+```http
+GET /api/v1/orders/{id}/recommend-box/
+```
 
-Total Order Weight = $2.15\text{ kg}$, Total Order Volume = $4056\text{ cm}^3$.
+This evaluates the products belonging to the saved order.
 
-**Evaluating Candidate Box: Small Shipping Box ($25 \times 20 \times 15\text{ cm}$, Max Weight $5.0\text{ kg}$, Cost $\$1.20$)**:
-1. **Pre-checks**:
-   - Weight: $2.15\text{ kg} \le 5.0\text{ kg}$ (PASS).
-   - Volume: $4056\text{ cm}^3 \le 7500\text{ cm}^3$ (PASS).
-   - Sizing: All items fit within $[25, 20, 15]$ in isolation (PASS).
-2. **Placement**:
-   - **Book 1**: Placed at $(0, 0, 0)$ with dimensions $(24, 17, 3.5)$. EP updated: $(24, 0, 0), (0, 17, 0), (0, 0, 3.5)$.
-   - **Book 2**: Placed at candidate point $(0, 0, 3.5)$ with dimensions $(24, 17, 3.5)$. EP updated: $(0, 0, 7.0)$.
-   - **Coffee Mug**: Placed at candidate point $(0, 0, 7.0)$ with dimensions $(12, 10, 10)$. Bounds check: $z = 7.0 + 10 = 17.0 \le 15.0$ (Wait, height $17.0 > 15.0$, fails on $z$).
-   - **Rotation Test for Coffee Mug**: Rotated to $(10, 10, 12)$ or placed at $(0, 0, 7.0)$ with height $7.0 + 8.0 = 15.0 \le 15.0$. Fits perfectly!
-3. **Validation & Selection**: `validate_placements()` returns `True`. The Small Shipping Box is selected as `RECOMMENDED` because it costs $\$1.20$ (cheapest feasible box).
+A recommendation can also create an audit record through `BoxRecommendation`.
 
 ---
 
-## System Assumptions & Units
+# API Response
 
-1. **Units**:
-   - Dimensions: centimeters (`cm`)
-   - Weight: kilograms (`kg`)
-   - Cost: base currency (`USD` / single currency)
-2. **Box Usable Space**: Box dimensions represent **internal usable dimensions**.
-3. **Weight Limits**: Box `max_weight` applies to total item contents weight. Box `empty_weight` is stored as an optional field and ignored for weight limit checks by default.
-4. **Item Orientation**: Items can be rotated into any of 6 3D orientations unless restricted.
-5. **Exact Arithmetic**: Database fields and algorithm calculations use `Decimal` (`max_digits=10`, `decimal_places=2/3`).
+A successful recommendation has the following general structure:
+
+```json
+{
+  "status": "RECOMMENDED",
+  "recommended_box": {
+    "id": 3,
+    "name": "Medium Shipping Box",
+    "cost": "2.10",
+    "dimensions": [
+      "35.00",
+      "28.00",
+      "20.00"
+    ]
+  },
+  "order_summary": {
+    "total_items": 3,
+    "total_weight": "2.150",
+    "total_volume": "4056.00"
+  },
+  "utilisation": {
+    "volume_pct": 20.6,
+    "weight_pct": 10.8
+  },
+  "placements": [],
+  "alternatives": [],
+  "rejected_boxes": []
+}
+```
+
+The exact placement list contains the position and oriented dimensions for every expanded item.
 
 ---
 
-## Rejection Reasons
+# API Example
 
-When a box cannot hold an order, the system outputs one of 4 machine-readable rejection reasons:
+## Request
 
-| Rejection Reason | Cause |
-|---|---|
-| `WEIGHT_EXCEEDED` | Total order weight exceeds box `max_weight`. |
-| `ITEM_TOO_LARGE` | A single item's sorted dimensions exceed box sorted dimensions in isolation. |
-| `VOLUME_EXCEEDED` | Sum of item volumes exceeds total box volume. |
-| `NO_PACKING_FOUND` | Box passes pre-checks, but geometric Extreme Points heuristic fails to find a valid 3D placement. |
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/recommend-box/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "items": [
+      {
+        "sku": "PROD-BOOK",
+        "quantity": 2
+      },
+      {
+        "sku": "PROD-MUG",
+        "quantity": 1
+      }
+    ]
+  }'
+```
 
 ---
 
-## Known Limitations & Future Improvements
+# Core Algorithm
 
-### Known Limitations
-1. **Heuristic False Negatives**: 3D Bin Packing is NP-hard. The Extreme Points placement heuristic may occasionally declare `NO_PACKING_FOUND` for extremely tight, hyper-complex geometric configurations where a complex packing exists.
-2. **Fragility & Orientations**: Does not currently enforce "This Side Up" orientation locks or fragile item stacking rules (heavy items on top of light items).
-3. **Padding / Void-Fill**: Does not account for protective bubble wrap or paper padding space.
+The packing engine is implemented in:
 
-### Future Improvements
-1. **Multi-Box Splitting**: Implement a First-Fit-Decreasing multi-box splitting algorithm when an order cannot fit into any single box.
-2. **Fragility & Stacking Rules**: Support `allow_rotation=False` and max stacking weight constraints per product.
-3. **Redis Caching**: Cache recommendation results for identical SKU-quantity payload hashes to achieve sub-millisecond response times.
-4. **Async Processing**: Offload massive bulk order batch recommendations to Celery background workers.
+```text
+boxes/services/packing.py
+```
+
+It is deliberately independent of Django and the ORM.
+
+The algorithm is a deterministic heuristic for 3D bin packing.
+
+Exact 3D bin packing is NP-hard, so this implementation does not attempt to find a mathematically optimal packing arrangement for every possible input.
+
+Instead, it guarantees:
+
+* deterministic behavior
+* valid geometry for every successful packing
+* no overlapping placements
+* no placement outside the box
+* exact Decimal comparisons
+* documented rejection reasons
+
+The heuristic can produce **false negatives**, but it must never produce a false positive.
+
+---
+
+# Algorithm Steps
+
+## 1. Expand order quantities
+
+An order line such as:
+
+```text
+PROD-BOOK × 3
+```
+
+is expanded into three individual items:
+
+```text
+PROD-BOOK#1
+PROD-BOOK#2
+PROD-BOOK#3
+```
+
+This simplifies geometric placement.
+
+---
+
+## 2. Sort items deterministically
+
+Items are processed using deterministic ordering based on:
+
+1. Volume descending
+2. Longest dimension descending
+3. Stable item identifier
+
+This means the same input produces the same packing result.
+
+---
+
+## 3. Pre-check every box
+
+Before running geometric packing, each active box is checked for obvious failures.
+
+### Weight
+
+If:
+
+```text
+total item weight > box max_weight
+```
+
+the box is rejected:
+
+```text
+WEIGHT_EXCEEDED
+```
+
+### Volume
+
+If:
+
+```text
+total item volume > box volume
+```
+
+the box is rejected:
+
+```text
+VOLUME_EXCEEDED
+```
+
+### Individual item dimensions
+
+The dimensions of an item and box are sorted independently.
+
+For example:
+
+```text
+Item:
+10 × 20 × 30
+
+Box:
+15 × 25 × 30
+```
+
+Sorted comparison:
+
+```text
+10 <= 15
+20 <= 25
+30 <= 30
+```
+
+Therefore the item can fit in at least one orientation.
+
+This test is only an individual-item pre-check. It does not prove that the complete order fits.
+
+If an individual item cannot fit in any orientation:
+
+```text
+ITEM_TOO_LARGE
+```
+
+---
+
+# Extreme Points Packing
+
+For boxes that pass the pre-checks, the system uses an Extreme Points placement heuristic.
+
+The initial candidate point is:
+
+```text
+(0, 0, 0)
+```
+
+After placing an item, new candidate points are generated around its boundaries.
+
+Candidates are evaluated deterministically using:
+
+```text
+z ASC
+y ASC
+x ASC
+```
+
+For every item, the algorithm tries each unique allowed orientation at each candidate position.
+
+---
+
+# Placement Validation
+
+A placement is valid only if:
+
+```text
+x >= 0
+y >= 0
+z >= 0
+```
+
+and:
+
+```text
+x + item_length <= box_length
+y + item_width  <= box_width
+z + item_height <= box_height
+```
+
+The algorithm also checks pairwise overlap.
+
+Two items that only touch at a face are allowed.
+
+For example:
+
+```text
+Item A ends at x = 10
+Item B starts at x = 10
+```
+
+is valid.
+
+Actual intersection is not allowed.
+
+Before returning a successful packing, the independent:
+
+```text
+validate_placements()
+```
+
+function re-checks:
+
+* bounds
+* pairwise overlap
+
+This provides the zero-false-positive guarantee.
+
+---
+
+# Box Selection Rules
+
+After evaluating every active box:
+
+### Feasible boxes
+
+Feasible boxes are sorted by:
+
+```text
+cost ASC
+volume ASC
+id ASC
+```
+
+Therefore:
+
+1. Cheapest box wins.
+2. If costs are equal, smaller volume wins.
+3. If cost and volume are equal, lower ID wins.
+
+The first feasible box is:
+
+```text
+recommended_box
+```
+
+The next two feasible boxes are:
+
+```text
+alternatives
+```
+
+Every rejected box is included with its machine-readable reason.
+
+---
+
+# Step-by-Step Worked Example
+
+Consider an order containing:
+
+```text
+2 × Hardcover Book
+Dimensions: 24 × 17 × 3.5 cm
+Weight: 0.85 kg each
+
+1 × Coffee Mug
+Dimensions: 12 × 10 × 10 cm
+Weight: 0.45 kg
+```
+
+Total quantity:
+
+```text
+3 items
+```
+
+Total weight:
+
+```text
+(2 × 0.85) + 0.45
+= 2.15 kg
+```
+
+Total volume:
+
+```text
+2 × (24 × 17 × 3.5)
++ (12 × 10 × 10)
+
+= 2856 + 1200
+= 4056 cm³
+```
+
+---
+
+## Candidate Box
+
+Consider:
+
+```text
+Medium Shipping Box
+
+Dimensions:
+35 × 28 × 20 cm
+
+Maximum contents weight:
+10 kg
+
+Cost:
+2.10
+```
+
+### Step 1 — Weight
+
+```text
+Order weight = 2.15 kg
+Box capacity = 10 kg
+
+2.15 <= 10
+```
+
+Pass.
+
+### Step 2 — Volume
+
+Box volume:
+
+```text
+35 × 28 × 20
+= 19600 cm³
+```
+
+Order volume:
+
+```text
+4056 cm³
+```
+
+Therefore:
+
+```text
+4056 <= 19600
+```
+
+Pass.
+
+### Step 3 — Individual dimensions
+
+All three items can fit individually within:
+
+```text
+35 × 28 × 20
+```
+
+Pass.
+
+### Step 4 — Placement
+
+The deterministic packing algorithm tries orientations and candidate points.
+
+One valid arrangement is:
+
+```text
+Book 1:
+position = (0, 0, 0)
+dimensions = (24, 17, 3.5)
+
+Book 2:
+position = (0, 0, 3.5)
+dimensions = (24, 17, 3.5)
+
+Mug:
+position = (24, 0, 0)
+dimensions = (10, 12, 10)
+```
+
+The mug is rotated from:
+
+```text
+12 × 10 × 10
+```
+
+to:
+
+```text
+10 × 12 × 10
+```
+
+The mug occupies the remaining area beside the books.
+
+The validator then checks the complete placement.
+
+If all bounds and pairwise overlap checks pass, the box is considered feasible.
+
+---
+
+# Rejection Reasons
+
+The system uses machine-readable rejection reasons.
+
+| Reason             | Meaning                                                                      |
+| ------------------ | ---------------------------------------------------------------------------- |
+| `WEIGHT_EXCEEDED`  | Total order weight exceeds box maximum contents weight                       |
+| `ITEM_TOO_LARGE`   | At least one item cannot fit in any orientation                              |
+| `VOLUME_EXCEEDED`  | Total item volume exceeds box volume                                         |
+| `NO_PACKING_FOUND` | Pre-checks pass, but the heuristic cannot find a valid geometric arrangement |
+
+A box can pass the volume check but still fail geometrically.
+
+For example, two objects may have a combined volume smaller than the box while their shapes prevent them from being arranged inside it.
+
+---
+
+# Duplicate SKU Handling
+
+Duplicate SKUs in a recommendation request are **merged by summing their quantities**.
+
+For example:
+
+```json
+{
+  "items": [
+    {
+      "sku": "PROD-BOOK",
+      "quantity": 2
+    },
+    {
+      "sku": "PROD-BOOK",
+      "quantity": 3
+    }
+  ]
+}
+```
+
+is treated as:
+
+```json
+{
+  "items": [
+    {
+      "sku": "PROD-BOOK",
+      "quantity": 5
+    }
+  ]
+}
+```
+
+This behavior prevents duplicate request lines from producing inconsistent packing input.
+
+---
+
+# System Assumptions and Units
+
+## Dimensions
+
+All dimensions are measured in:
+
+```text
+centimetres (cm)
+```
+
+---
+
+## Weight
+
+Weights are measured in:
+
+```text
+kilograms (kg)
+```
+
+---
+
+## Cost
+
+Cost is represented as a Decimal value in a single application currency.
+
+The system does not perform currency conversion.
+
+---
+
+## Box Dimensions
+
+Box dimensions represent the **internal usable dimensions** of the box.
+
+External cardboard thickness is not considered.
+
+---
+
+## Weight Limit
+
+`max_weight` represents the maximum weight of the **contents**.
+
+The optional `empty_weight` field is stored for reference but is ignored by the recommendation weight check by default.
+
+Therefore:
+
+```text
+contents weight <= max_weight
+```
+
+is the relevant condition.
+
+---
+
+## Rotation
+
+Products can be rotated into any of their six possible 3D orientations unless a future orientation restriction is introduced.
+
+For dimensions:
+
+```text
+L × W × H
+```
+
+the algorithm considers permutations of these dimensions.
+
+Duplicate orientations, such as those produced by equal dimensions, are not unnecessarily repeated.
+
+---
+
+## Decimal Precision
+
+Money, dimensions, and weights use Python/Django `Decimal` values.
+
+The algorithm avoids floating-point arithmetic for geometric and financial comparisons.
+
+This prevents precision problems such as:
+
+```text
+0.1 + 0.2 != 0.3
+```
+
+when represented using binary floating-point arithmetic.
+
+---
+
+## Padding and Void Fill
+
+Protective packaging such as:
+
+* bubble wrap
+* paper
+* foam
+* air pillows
+
+is outside the scope of this implementation.
+
+---
+
+# API Validation and Errors
+
+The API uses consistent validation responses.
+
+Examples of invalid input include:
+
+* empty item list
+* zero quantity
+* negative quantity
+* unknown SKU
+* inactive product
+* excessive expanded unit count
+* invalid product/box dimensions
+
+Unknown saved orders return:
+
+```text
+404 Not Found
+```
+
+Invalid request data returns:
+
+```text
+400 Bad Request
+```
+
+The API does not intentionally return a 500 response for normal client validation errors.
+
+---
+
+# Maximum Order Size
+
+The system limits the number of expanded individual units processed by the packing algorithm.
+
+The default limit is:
+
+```text
+200 units
+```
+
+For example:
+
+```text
+500 × PROD-SMALL
+```
+
+will be rejected rather than attempting to pack 500 units.
+
+This protects the application from unexpectedly expensive geometric calculations.
+
+The limit can be configured through application settings/environment configuration.
+
+---
+
+# Known Limitations
+
+## 1. Heuristic false negatives
+
+3D bin packing is computationally difficult.
+
+The Extreme Points heuristic may fail to find a packing even if another more sophisticated arrangement exists.
+
+Therefore:
+
+```text
+NO_PACKING_FOUND
+```
+
+does not necessarily prove mathematical impossibility.
+
+However, a successful result is independently validated and must have valid geometry.
+
+---
+
+## 2. No exact optimization
+
+The algorithm does not search every possible arrangement.
+
+It prioritizes:
+
+* deterministic behavior
+* explainability
+* reasonable performance
+* correctness of successful placements
+
+over guaranteed globally optimal packing.
+
+---
+
+## 3. No fragile-item rules
+
+The current implementation does not enforce rules such as:
+
+```text
+THIS SIDE UP
+FRAGILE
+DO NOT STACK
+```
+
+---
+
+## 4. No stacking-weight restrictions
+
+The algorithm does not currently model product-specific stacking limits.
+
+---
+
+## 5. No padding or void-fill calculations
+
+The available internal dimensions are treated as fully usable space.
+
+---
+
+## 6. Single-box recommendation
+
+The primary recommendation system attempts to find **one box** that can contain the complete order.
+
+If no single box works, it returns:
+
+```text
+NO_SINGLE_BOX_FITS
+```
+
+A multi-box splitting algorithm is not part of the current production recommendation flow.
+
+---
+
+# Future Improvements
+
+## 1. Multi-box splitting
+
+Implement a First-Fit-Decreasing based multi-box fallback for orders that cannot fit inside one box.
+
+The feature would be treated as heuristic/experimental because minimizing total packaging cost across multiple boxes introduces another optimization problem.
+
+---
+
+## 2. Fragility and stacking rules
+
+Add product-level constraints such as:
+
+```text
+allow_rotation
+fragile
+max_stack_weight
+this_side_up
+```
+
+---
+
+## 3. Caching
+
+Recommendation results could be cached based on a normalized SKU/quantity payload.
+
+This could reduce repeated calculations for identical orders.
+
+---
+
+## 4. Async Processing
+
+Very large order batches could be processed asynchronously using background workers such as Celery.
+
+The current implementation deliberately limits expanded units to avoid unbounded synchronous processing.
+
+---
+
+# OpenAPI Documentation
+
+The project uses `drf-spectacular` for OpenAPI documentation.
+
+After starting the server, Swagger UI is available at:
+
+```text
+http://127.0.0.1:8000/api/schema/swagger-ui/
+```
+
+The generated OpenAPI schema can also be accessed through the project's schema endpoint.
+
+---
+
+# Django Admin
+
+The following models are registered in Django admin:
+
+* Product
+* Box
+* Order
+* OrderItem
+* BoxRecommendation
+
+The admin provides useful:
+
+* list displays
+* filtering
+* searching
+* relationship visibility
+
+Create a superuser with:
+
+```bash
+python manage.py createsuperuser
+```
+
+Then visit:
+
+```text
+http://127.0.0.1:8000/admin/
+```
+
+---
+
+# CI
+
+GitHub Actions runs automated checks on push and pull requests.
+
+The CI workflow performs:
+
+1. Python environment setup
+2. Dependency installation
+3. Ruff linting
+4. Test execution
+5. Coverage reporting
+
+Workflow file:
+
+```text
+.github/workflows/ci.yml
+```
+
+---
+
+# Test Output
+
+The repository contains:
+
+```text
+TEST_OUTPUT.md
+```
+
+This file should contain the actual locally executed test output.
+
+Test results should never be manually fabricated.
+
+---
+
+# AI Usage
+
+The repository contains:
+
+```text
+AI_USAGE.md
+```
+
+This file intentionally contains the required section headings for documenting AI assistance.
+
+The final content describing tools, prompts, accepted/rejected output, mistakes, and verification should be completed by the developer.
+
+---
+
+# Development Philosophy
+
+The project intentionally favors:
+
+* readable code
+* explicit data structures
+* deterministic algorithms
+* Decimal arithmetic
+* independent validation
+* meaningful tests
+* simple Django architecture
+* explainability over clever abstractions
+
+The core packing logic is kept separate from Django so that it can be unit-tested without database or framework dependencies.
+
+---
+
+# License
+
+This project was created as a technical hiring assignment.
+
+Add an appropriate license here if the project is later intended for public distribution.
