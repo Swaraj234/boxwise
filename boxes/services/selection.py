@@ -89,7 +89,7 @@ def select_box(items: list[Item], boxes: list[BoxSpec]) -> SelectionResult:
         )
 
     # Sort feasible boxes deterministically: cost ASC, volume ASC, box_id ASC
-    feasible_boxes.sort(key=lambda pair: (pair[0].cost, pair[0].volume, str(pair[0].box_id)))
+    feasible_boxes.sort(key=lambda pair: (pair[0].cost, pair[0].volume, pair[0].box_id))
 
     best_box, best_result = feasible_boxes[0]
     alternative_pairs = feasible_boxes[1:3]

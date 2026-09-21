@@ -183,15 +183,14 @@ def pack_box(items: list[Item], box: BoxSpec) -> PackingResult:
             utilisation_weight_pct=Decimal("0.0"),
         )
 
-    # Deterministic item sorting: volume DESC, max side DESC, SKU/id ASC
+    # Deterministic item sorting: volume DESC, max side DESC, item_id ASC
     sorted_items = sorted(
         items,
         key=lambda it: (
-            it.volume,
-            max(it.length, it.width, it.height),
-            str(it.item_id),
+            -it.volume,
+            -max(it.length, it.width, it.height),
+            it.item_id,
         ),
-        reverse=True,
     )
 
     # Extreme Points initialization
@@ -308,10 +307,9 @@ def pack_box(items: list[Item], box: BoxSpec) -> PackingResult:
                 ),
             )
 
-    # Independent assertion to guarantee zero false positives
-    assert validate_placements(
-        box, placements
-    ), "Internal Assertion Error: Generated invalid placements!"
+    # Independent validation to guarantee zero false positives
+    if not validate_placements(box, placements):
+        raise RuntimeError("Generated invalid placements!")
 
     return PackingResult(
         fits=True,

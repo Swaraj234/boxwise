@@ -106,6 +106,39 @@ class TestSelectionEngine:
         assert res.recommended_box is not None
         assert res.recommended_box.box_id == 2  # Lowest box ID wins tie-break
 
+    def test_tie_break_lowest_numeric_id_10_vs_2(self):
+        box_id_10 = BoxSpec(
+            box_id=10,
+            name="Box Ten",
+            internal_length=Decimal("20.00"),
+            internal_width=Decimal("20.00"),
+            internal_height=Decimal("20.00"),
+            max_weight=Decimal("10.000"),
+            cost=Decimal("2.00"),
+        )
+        box_id_2 = BoxSpec(
+            box_id=2,
+            name="Box Two",
+            internal_length=Decimal("20.00"),
+            internal_width=Decimal("20.00"),
+            internal_height=Decimal("20.00"),
+            max_weight=Decimal("10.000"),
+            cost=Decimal("2.00"),
+        )
+        item = Item(
+            "it-1",
+            "PROD",
+            Decimal("10.00"),
+            Decimal("10.00"),
+            Decimal("10.00"),
+            Decimal("1.000"),
+        )
+
+        res = select_box([item], [box_id_10, box_id_2])
+        assert res.status == "RECOMMENDED"
+        assert res.recommended_box is not None
+        assert res.recommended_box.box_id == 2  # Numeric ID 2 wins over 10
+
     def test_alternatives_and_rejected_boxes_formatting(self):
         box_fit_1 = BoxSpec(
             1,

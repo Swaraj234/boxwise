@@ -270,6 +270,48 @@ class TestGeometryNoFitAndDeterminism:
             ]
             assert sorted(coords1) == sorted(coords2)
 
+    def test_identical_items_ascending_item_id_order(self):
+        box = BoxSpec(
+            box_id=1,
+            name="Box",
+            internal_length=Decimal("30.00"),
+            internal_width=Decimal("10.00"),
+            internal_height=Decimal("10.00"),
+            max_weight=Decimal("10.000"),
+            cost=Decimal("1.00"),
+        )
+        # 3 identical items passed in order 3, 1, 2
+        item3 = Item(
+            item_id=3,
+            sku="CUBE",
+            length=Decimal("10.00"),
+            width=Decimal("10.00"),
+            height=Decimal("10.00"),
+            weight=Decimal("1.000"),
+        )
+        item1 = Item(
+            item_id=1,
+            sku="CUBE",
+            length=Decimal("10.00"),
+            width=Decimal("10.00"),
+            height=Decimal("10.00"),
+            weight=Decimal("1.000"),
+        )
+        item2 = Item(
+            item_id=2,
+            sku="CUBE",
+            length=Decimal("10.00"),
+            width=Decimal("10.00"),
+            height=Decimal("10.00"),
+            weight=Decimal("1.000"),
+        )
+
+        res = pack_box([item3, item1, item2], box)
+        assert res.fits is True
+        # Identical items must be placed in ascending item_id order: 1, then 2, then 3
+        placed_ids = [p.item_id for p in res.placements]
+        assert placed_ids == [1, 2, 3]
+
 
 class TestPerformance:
     def test_pack_200_small_items_under_time_limit(self):
