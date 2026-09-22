@@ -39,10 +39,10 @@ class Product(models.Model):
     class Meta:
         ordering = ["sku"]
         constraints = [
-            models.CheckConstraint(check=Q(length__gt=0), name="product_length_gt_zero"),
-            models.CheckConstraint(check=Q(width__gt=0), name="product_width_gt_zero"),
-            models.CheckConstraint(check=Q(height__gt=0), name="product_height_gt_zero"),
-            models.CheckConstraint(check=Q(weight__gt=0), name="product_weight_gt_zero"),
+            models.CheckConstraint(condition=Q(length__gt=0), name="product_length_gt_zero"),
+            models.CheckConstraint(condition=Q(width__gt=0), name="product_width_gt_zero"),
+            models.CheckConstraint(condition=Q(height__gt=0), name="product_height_gt_zero"),
+            models.CheckConstraint(condition=Q(weight__gt=0), name="product_weight_gt_zero"),
         ]
 
     @property
@@ -102,16 +102,16 @@ class Box(models.Model):
         verbose_name_plural = "Boxes"
         constraints = [
             models.CheckConstraint(
-                check=Q(internal_length__gt=0), name="box_internal_length_gt_zero"
+                condition=Q(internal_length__gt=0), name="box_internal_length_gt_zero"
             ),
             models.CheckConstraint(
-                check=Q(internal_width__gt=0), name="box_internal_width_gt_zero"
+                condition=Q(internal_width__gt=0), name="box_internal_width_gt_zero"
             ),
             models.CheckConstraint(
-                check=Q(internal_height__gt=0), name="box_internal_height_gt_zero"
+                condition=Q(internal_height__gt=0), name="box_internal_height_gt_zero"
             ),
-            models.CheckConstraint(check=Q(max_weight__gt=0), name="box_max_weight_gt_zero"),
-            models.CheckConstraint(check=Q(cost__gte=0), name="box_cost_gte_zero"),
+            models.CheckConstraint(condition=Q(max_weight__gt=0), name="box_max_weight_gt_zero"),
+            models.CheckConstraint(condition=Q(cost__gte=0), name="box_cost_gte_zero"),
         ]
 
     @property
@@ -146,7 +146,7 @@ class OrderItem(models.Model):
     class Meta:
         unique_together = ("order", "product")
         constraints = [
-            models.CheckConstraint(check=Q(quantity__gt=0), name="orderitem_quantity_gt_zero")
+            models.CheckConstraint(condition=Q(quantity__gt=0), name="orderitem_quantity_gt_zero")
         ]
 
     def __str__(self) -> str:
